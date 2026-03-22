@@ -7,8 +7,8 @@ const { frontmatter } = useData()
   <div class="home-page">
     <!-- Hero -->
     <section class="hero">
+      <img src="/images/clawline-logo-wide.png" alt="Clawline" class="hero-logo" />
       <div class="hero-inner">
-        <img src="/images/clawline-logo-wide.png" alt="Clawline" class="hero-logo" />
         <h1 class="hero-title">
           让 AI Agent<br>
           <span class="hero-highlight">拥有自己的前端</span>
@@ -145,12 +145,10 @@ const { frontmatter } = useData()
 }
 .hero-logo {
   display: block;
-  max-width: 360px;
+  width: 100%;
+  max-width: 100%;
   height: auto;
   margin: 0 auto 1.5rem;
-}
-@media (max-width: 639px) {
-  .hero-logo { max-width: 240px; }
 }
 .hero-title {
   font-family: var(--cl-font-display);
