@@ -37,8 +37,9 @@ export default defineConfig({
           text: 'Relay Gateway',
           items: [
             { text: '概述', link: '/gateway/' },
-            { text: '部署', link: '/gateway/deploy' },
+            { text: '部署指南', link: '/gateway/deploy' },
             { text: 'API 参考', link: '/gateway/api' },
+            { text: '管理后台', link: '/gateway/admin-ui' },
           ]
         }
       ],
@@ -48,7 +49,9 @@ export default defineConfig({
           items: [
             { text: '概述', link: '/channel/' },
             { text: '安装配置', link: '/channel/setup' },
-            { text: '接入指南', link: '/channel/integration' },
+            { text: '接入指南', link: '/channel/INTEGRATION_GUIDE' },
+            { text: '配置示例', link: '/channel/CONFIG_EXAMPLES_ZH' },
+            { text: '主动 DM', link: '/channel/PROACTIVE_DM' },
           ]
         }
       ],
@@ -57,8 +60,9 @@ export default defineConfig({
           text: 'Client Web',
           items: [
             { text: '概述', link: '/client-web/' },
-            { text: '部署', link: '/client-web/deploy' },
-            { text: '定制', link: '/client-web/customize' },
+            { text: '功能说明', link: '/client-web/features' },
+            { text: '部署指南', link: '/client-web/deploy' },
+            { text: '定制指南', link: '/client-web/customize' },
           ]
         }
       ],
