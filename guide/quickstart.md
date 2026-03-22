@@ -1,14 +1,67 @@
 # 快速开始
 
-用 5 分钟把 Clawline 跑起来，在浏览器中和你的 OpenClaw Agent 对话。
+两条路径，选适合你的：
+
+- **路径 A：直连模式** — 2 分钟，内网/本机直接用
+- **路径 B：Relay 模式** — 5 分钟，公网暴露、多用户
 
 ## 前提
 
 - 一台 OpenClaw 节点（已有 Agent 在运行）
 - Node.js 18+
-- 一台有公网 IP 的服务器（用于 Relay），或本机测试
 
-## 第一步：启动 Relay Gateway
+---
+
+## 路径 A：直连模式（最简）
+
+### 第一步：安装 Channel Plugin
+
+```bash
+openclaw plugins install @clawlines/clawline
+```
+
+### 第二步：配置 WebSocket 直连
+
+编辑 `~/.openclaw/openclaw.json`：
+
+```json
+{
+  "channels": {
+    "clawline": {
+      "enabled": true,
+      "connectionMode": "websocket",
+      "websocket": {
+        "port": 3100
+      }
+    }
+  }
+}
+```
+
+重启 Gateway：
+
+```bash
+openclaw gateway restart
+```
+
+### 第三步：打开 Client Web
+
+```bash
+git clone https://github.com/clawline/client-web.git
+cd client-web && npm install && npm run dev
+```
+
+连接地址填 `ws://localhost:3100`，发消息，收到回复。🎉
+
+就这么简单。
+
+---
+
+## 路径 B：Relay 模式（跨网络）
+
+适合公网部署、多用户场景。需要一台有公网 IP 的服务器放 Relay。
+
+### 第一步：启动 Relay Gateway
 
 ```bash
 git clone https://github.com/clawline/gateway.git
@@ -19,8 +72,6 @@ npm install
 # 最简启动（本地文件存储，适合开发）
 RELAY_PORT=19080 npm start
 ```
-
-Relay 启动后会在 `http://localhost:19080` 提供服务。
 
 ::: tip 生产部署
 生产环境建议配置 Supabase 作为持久存储，并用 Caddy/Nginx 提供 HTTPS。详见 [Gateway 部署指南](/gateway/deploy)。
@@ -51,7 +102,7 @@ curl -X POST http://localhost:19080/api/channels \
 在 OpenClaw 节点上：
 
 ```bash
-openclaw plugins install @restry/clawline
+openclaw plugins install @clawlines/clawline
 ```
 
 编辑 `~/.openclaw/openclaw.json`，添加 Channel 配置：
