@@ -7,12 +7,14 @@ export default defineConfig({
   description: 'OpenClaw 的 Web 接入方案',
   
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
-    ['meta', { name: 'theme-color', content: '#1a1a2e' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/favicon-16x16.png' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' }],
+    ['meta', { name: 'theme-color', content: '#c05030' }],
   ],
 
   themeConfig: {
-    logo: '/logo.svg',
+    logo: '/favicon-32x32.png',
     
     nav: [
       { text: '指南', link: '/guide/what-is' },

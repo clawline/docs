@@ -8,7 +8,7 @@ const { frontmatter } = useData()
     <!-- Hero -->
     <section class="hero">
       <div class="hero-inner">
-        <p class="hero-badge">OpenClaw 生态</p>
+        <img src="/images/clawline-logo-wide.png" alt="Clawline" class="hero-logo" />
         <h1 class="hero-title">
           让 AI Agent<br>
           <span class="hero-highlight">拥有自己的前端</span>
@@ -143,17 +143,14 @@ const { frontmatter } = useData()
   max-width: 720px;
   margin: 0 auto;
 }
-.hero-badge {
-  display: inline-block;
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--cl-text-muted);
-  border: 1px solid var(--cl-border-strong);
-  border-radius: 100px;
-  padding: 0.3em 1em;
-  margin-bottom: 1.5rem;
+.hero-logo {
+  display: block;
+  max-width: 360px;
+  height: auto;
+  margin: 0 auto 1.5rem;
+}
+@media (max-width: 639px) {
+  .hero-logo { max-width: 240px; }
 }
 .hero-title {
   font-family: var(--cl-font-display);
