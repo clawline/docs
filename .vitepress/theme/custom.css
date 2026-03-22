@@ -1,0 +1,51 @@
+:root {
+  /* Brand: warm terracotta → industrial, grounded, not "AI purple" */
+  --cl-brand: oklch(55% 0.14 30);
+  --cl-brand-light: oklch(70% 0.10 30);
+  --cl-brand-dim: oklch(40% 0.10 30);
+  
+  /* Tinted neutrals (warm) */
+  --cl-text: oklch(20% 0.01 60);
+  --cl-text-secondary: oklch(45% 0.01 60);
+  --cl-text-muted: oklch(60% 0.01 60);
+  --cl-bg: oklch(98.5% 0.005 60);
+  --cl-bg-elevated: oklch(100% 0 0);
+  --cl-border: oklch(88% 0.01 60);
+  --cl-border-strong: oklch(78% 0.01 60);
+  
+  /* Override VitePress brand */
+  --vp-c-brand-1: oklch(55% 0.14 30);
+  --vp-c-brand-2: oklch(50% 0.12 30);
+  --vp-c-brand-3: oklch(45% 0.10 30);
+  --vp-c-brand-soft: oklch(90% 0.04 30);
+  
+  /* Typography */
+  --cl-font-display: 'DM Serif Display', Georgia, 'Noto Serif SC', serif;
+  --cl-font-body: 'DM Sans', -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --cl-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.dark {
+  --cl-text: oklch(92% 0.01 60);
+  --cl-text-secondary: oklch(70% 0.01 60);
+  --cl-text-muted: oklch(55% 0.01 60);
+  --cl-bg: oklch(14% 0.005 60);
+  --cl-bg-elevated: oklch(18% 0.005 60);
+  --cl-border: oklch(25% 0.01 60);
+  --cl-border-strong: oklch(35% 0.01 60);
+}
+
+/* Google Fonts load */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&family=DM+Serif+Display&family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;700&display=swap');
+
+/* Global overrides */
+:root {
+  --vp-font-family-base: var(--cl-font-body);
+  --vp-font-family-mono: var(--cl-font-mono);
+}
+
+/* VitePress nav tweaks */
+.VPNav .title {
+  font-family: var(--cl-font-display) !important;
+  letter-spacing: -0.01em;
+}
