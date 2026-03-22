@@ -30,13 +30,33 @@ openclaw plugins install @clawlines/clawline
     "clawline": {
       "enabled": true,
       "connectionMode": "websocket",
-      "websocket": {
-        "port": 3100
+      "wsPort": 3100
+    }
+  }
+}
+```
+
+::: warning 安全提示
+默认无鉴权，适合本机/内网开发。如需限制访问，启用 token 鉴权：
+```json
+{
+  "channels": {
+    "clawline": {
+      "enabled": true,
+      "connectionMode": "websocket",
+      "wsPort": 3100,
+      "auth": {
+        "enabled": true,
+        "users": [
+          { "senderId": "alice", "token": "your-secret-token" }
+        ]
       }
     }
   }
 }
 ```
+Client 连接时在 URL 加 `?token=your-secret-token`。
+:::
 
 重启 Gateway：
 
