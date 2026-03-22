@@ -19,6 +19,7 @@ export default defineConfig({
       { text: 'Relay Gateway', link: '/gateway/' },
       { text: 'Channel Plugin', link: '/channel/' },
       { text: 'Client Web', link: '/client-web/' },
+      { text: 'SDK', link: '/sdk/' },
     ],
 
     sidebar: {
@@ -63,6 +64,16 @@ export default defineConfig({
             { text: '功能说明', link: '/client-web/features' },
             { text: '部署指南', link: '/client-web/deploy' },
             { text: '定制指南', link: '/client-web/customize' },
+          ]
+        }
+      ],
+      '/sdk/': [
+        {
+          text: 'Client SDK',
+          items: [
+            { text: '概述', link: '/sdk/' },
+            { text: '快速开始', link: '/sdk/quickstart' },
+            { text: 'API 参考', link: '/sdk/api' },
           ]
         }
       ],

@@ -86,7 +86,7 @@ const { frontmatter } = useData()
     <!-- Components -->
     <section class="section section-components">
       <div class="section-inner">
-        <h2 class="section-title">三个组件</h2>
+        <h2 class="section-title">四个组件</h2>
         <p class="section-subtitle">按需组合。只有 Channel Plugin 是必须的。</p>
         <div class="comp-grid">
           <a href="/channel/" class="comp-card">
@@ -94,6 +94,12 @@ const { frontmatter } = useData()
             <h3>📡 Channel Plugin</h3>
             <p>OpenClaw 插件。装了它，Agent 就能通过 WebSocket 收发消息。支持直连和 Relay 两种模式。</p>
             <code>openclaw plugins install @clawlines/clawline</code>
+          </a>
+          <a href="/sdk/" class="comp-card">
+            <div class="comp-optional">可选</div>
+            <h3>📦 Client SDK</h3>
+            <p>TypeScript SDK。想自己写前端？用它连接 Agent，10 行代码收发消息。浏览器 + Node.js 双平台。</p>
+            <code>npm install @clawlines/sdk</code>
           </a>
           <a href="/client-web/" class="comp-card">
             <div class="comp-optional">可选</div>
