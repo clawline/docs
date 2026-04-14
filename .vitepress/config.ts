@@ -32,6 +32,7 @@ export default defineConfig({
             { text: '什么是 Clawline', link: '/guide/what-is' },
             { text: '架构概览', link: '/guide/architecture' },
             { text: '快速开始', link: '/guide/quickstart' },
+            { text: 'Browser Agent', link: '/guide/browser-agent' },
           ]
         }
       ],
@@ -55,6 +56,7 @@ export default defineConfig({
             { text: '接入指南', link: '/channel/INTEGRATION_GUIDE' },
             { text: '配置示例', link: '/channel/CONFIG_EXAMPLES_ZH' },
             { text: '主动 DM', link: '/channel/PROACTIVE_DM' },
+            { text: 'ACP 线程', link: '/channel/acp-threads' },
           ]
         }
       ],

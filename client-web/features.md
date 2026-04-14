@@ -208,6 +208,64 @@ by-scope-timestamp → [connectionId, scopeId, timestamp]
 - 可独立开关
 - 适用于 PWA 场景
 
+## ACP 线程会话
+
+### ThreadSessionCard
+
+当 Agent 启动 ACP 子会话时，消息以可折叠的卡片形式展示：
+
+- 标题栏显示 ACP 会话信息：Agent 名称、运行模式（persistent/ephemeral）
+- 该线程的所有消息（Agent 回复和用户发送）归入同一卡片
+- 活跃 session 显示呼吸灯动画和关闭按钮
+- 点击关闭按钮发送 `/acp close` 结束会话
+- 支持展开/折叠
+
+### ACP Session Bar
+
+输入框上方显示 session 切换条（仅有 ACP session 时可见）：
+
+- 水平滚动的 chip 列表，显示 mode + sessionId 片段 + 消息数
+- 点击 chip 切换 `activeThreadId`，后续消息路由到该 session
+- 当前活跃 session chip 高亮
+- 从消息历史中自动提取，刷新页面后仍然显示
+
+## API Direct 标记
+
+通过 HTTP API (`POST /api/chat`) 发送的消息会在界面上显示 "API direct" badge，用于区分 WebSocket 实时消息和 API 调用产生的消息。
+
+标记依据：消息的 `meta.source` 字段为 `"api"`。
+
+## Phase-aware Streaming
+
+流式输出现在区分思考阶段和回复阶段：
+
+- **思考文本**：Agent 的推理过程，以 thinking 事件独立展示
+- **回复文本**：最终回复内容，通过 `text.delta` 事件流式输出
+- 两个阶段在 UI 上分离展示，用户可以清晰看到 Agent 的推理过程
+
+支持的事件类型：
+- `thinking.start` — 开始思考
+- `thinking.update` — 思考内容更新
+- `thinking.end` — 思考结束
+- `text.delta` — 回复文本增量
+
+## 跨设备消息同步
+
+消息支持跨设备和跨会话同步：
+
+- 进入 ChatRoom 时自动从远端同步最新消息
+- 监听 `message.receive` 事件，接收其他客户端发送的消息
+- 消息合并策略（`mergeMessages`）确保不重复
+- 配合 IndexedDB 本地缓存实现离线可用 + 在线同步
+
+## 动态 Quick Commands
+
+快捷命令列表按使用频率动态排序：
+
+- 最近使用过的命令排列在前
+- 命令搜索和过滤
+- 自动发现 Agent 支持的 Skill 命令
+
 ## 无障碍支持
 
 - 语义化 HTML 结构

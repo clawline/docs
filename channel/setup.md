@@ -318,6 +318,47 @@ wss://relay.example.com/client?channelId=demo&token=xxx
 
 ---
 
+## 消息离线持久化
+
+当客户端断开连接时，Agent 发送的消息不会丢失：
+
+- 消息始终写入历史记录（Supabase `cl_messages` 表），无论客户端是否在线
+- 客户端重连后自动同步缺失的消息（断点续传）
+- 流式输出按 `chatId::agentId` 键累积文本，重连时通过 `stream.resume` 事件恢复
+
+这确保了即使用户临时离线，也不会错过任何 Agent 回复。
+
+---
+
+## WebSocket 心跳
+
+Clawline 使用 ping/pong 心跳机制维持 WebSocket 连接的存活状态：
+
+- 插件定期向 relay 发送 ping 帧
+- 未收到 pong 响应时触发重连逻辑
+- 避免中间网络设备（如负载均衡器、NAT）因空闲超时断开连接
+
+> 心跳由插件自动管理，通常不需要额外配置。
+
+---
+
+## Skill 分类系统
+
+Agent 的 Skill（技能/命令）按来源分为四个层级：
+
+| 层级 | 说明 | 来源路径 |
+|------|------|----------|
+| `builtinSkills` | 系统内置技能 | OpenClaw 全局安装目录下的 `skills/` |
+| `globalSkills` | 用户安装的全局技能 | `~/.openclaw/skills/` |
+| `workspaceSkills` | Agent 工作区技能 | `~/.openclaw/workspace-{agentId}/skills/` |
+| `configuredSkills` | 配置声明的技能 | `openclaw.json` 中的 agent 配置 |
+
+`skills` 字段是以上所有类别的并集（去重）。
+
+客户端通过 `agent.list` WebSocket 事件获取分类后的技能列表，用于在 UI 中展示不同来源的命令。
+
+---
+
 ## 常见问题
 
 ### 安装相关

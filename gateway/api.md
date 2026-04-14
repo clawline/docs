@@ -207,6 +207,124 @@ Relay Gateway 支持三种鉴权方式，管理 API 需要其中之一：
 
 ---
 
+### POST /api/chat
+
+直接通过 HTTP 发送消息并获取 Agent 回复，**无需 WebSocket 连接**。适用于脚本集成、单次问答、自动化测试等场景。**需要管理鉴权**。
+
+**请求体：**
+
+```json
+{
+  "message": "你好，请帮我写一段代码",
+  "channelId": "demo",
+  "agentId": "main",
+  "senderId": "api-user",
+  "senderName": "API 调用者",
+  "chatId": "api-session-1"
+}
+```
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `message` | ✅ | - | 用户消息文本 |
+| `channelId` | ✅ | - | 目标 channel |
+| `agentId` | ✅ | - | 目标 Agent |
+| `senderId` | 否 | `"api"` | 发送者标识 |
+| `senderName` | 否 | 同 senderId | 发送者显示名 |
+| `chatId` | 否 | 同 senderId | 会话标识 |
+
+**实现机制：**
+
+- 网关为此请求创建一个虚拟 WebSocket 连接，模拟完整的消息收发流程
+- 入站和出站消息均持久化到 Supabase，并标记 `meta.source: "api"`
+- 入站消息会广播到该 channel 的所有已连接 WebSocket 客户端
+- 超时时间：**120 秒**
+
+**成功响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "messageId": "msg-1713000000000-abc123",
+  "content": "以下是一个简单的 Hello World 示例...",
+  "agentId": "main",
+  "timestamp": 1713000001234,
+  "meta": { "source": "api" }
+}
+```
+
+**错误响应：**
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 400 | 缺少 `message`、`channelId` 或 `agentId` |
+| 503 | 该 channel 的 backend 未连接 |
+| 504 | Agent 120 秒内未响应 |
+
+**使用示例：**
+
+```bash
+curl -X POST https://relay.example.com/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-Relay-Admin-Token: your-admin-token" \
+  -d '{
+    "message": "今天天气怎么样？",
+    "channelId": "demo",
+    "agentId": "main"
+  }'
+```
+
+---
+
+### GET /api/messages/sync
+
+同步消息历史，支持正向和反向分页。**需要管理鉴权或 Channel 鉴权**。
+
+**Query 参数：**
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `channelId` | ✅ | - | 目标 channel（仅允许 `[a-zA-Z0-9._-]`） |
+| `after` | 否 | - | 正向同步：获取此时间戳之后的消息 |
+| `before` | 否 | - | 反向同步：获取此时间戳之前的消息 |
+| `agentId` | 否 | - | 按 Agent 过滤（仅允许 `[a-zA-Z0-9._-]`） |
+| `limit` | 否 | `100` | 返回条数上限，最大 `500` |
+
+**分页行为：**
+
+- `after > 0`：正向分页，按时间升序返回
+- `before > 0 && !after`：反向分页，按时间降序查询后翻转为时间升序返回
+- 两者都不传：返回最新的 `limit` 条消息
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "id": 1,
+      "channel_id": "demo",
+      "sender_id": "alice",
+      "agent_id": "main",
+      "message_id": "msg-xxx",
+      "content": "你好",
+      "content_type": "text",
+      "direction": "inbound",
+      "media_url": null,
+      "thread_id": "clawline-thread-xxx",
+      "meta": "{\"source\":\"api\"}",
+      "timestamp": 1713000000000
+    }
+  ],
+  "hasMore": false
+}
+```
+
+> `hasMore` 为 `true` 时表示还有更多消息，可使用最后一条的 `timestamp` 作为下一次请求的 `after` 或 `before` 参数。
+
+---
+
 ### GET /api/relay-nodes
 
 获取 Relay 节点注册表（存储在 Supabase `cl_relay_nodes` 表中）。**需要管理鉴权**。
