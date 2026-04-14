@@ -30,6 +30,73 @@ Clawline 采用 **Relay 中转架构**，三个组件各司其职：
 └─────────────────────────────────────────────────────┘
 ```
 
+## 系统架构全景
+
+以下展示 Clawline 所有组件及其通信协议：
+
+```
+                         ┌─────────────────────────────────────────────────────────────────┐
+                         │                      Relay Gateway (公网)                        │
+                         │                                                                  │
+                         │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
+                         │   │  Channel A   │    │  Channel B   │    │  Channel C   │      │
+                         │   │  (鉴权/路由)  │    │  (鉴权/路由)  │    │  (鉴权/路由)  │      │
+                         │   └──────────────┘    └──────────────┘    └──────────────┘      │
+                         │          │                    │                   │               │
+                         │     /client (WSS)        /backend (WSS)    REST API (HTTPS)     │
+                         └─────┬──────┬──────┬──────────┬──────────────┬────────────────────┘
+                               │      │      │          │              │
+          WSS ─────────────────┤      │      │          │              │
+          (token auth)         │      │      │          │              │
+                               │      │      │          │              │
+┌──────────────────┐           │      │      │          │              │
+│  Client Web      │───────────┘      │      │          │              │
+│  (React PWA)     │                  │      │          │              │
+│  浏览器 / 桌面    │                  │      │          │              │
+└──────────────────┘                  │      │          │              │
+                          WSS ────────┘      │          │              │
+                          (token auth)       │          │              │
+┌──────────────────┐                         │          │              │
+│  Client WeChat   │─────────────────────────┘          │              │
+│  (Mini Program)  │    WSS (token auth)                │              │
+│  微信小程序       │                                    │              │
+└──────────────────┘                                    │              │
+                                                        │              │
+┌──────────────────┐                                    │              │
+│  Browser Agent   │   HTTP (127.0.0.1:4821)            │              │
+│  (Chrome Ext.)   │──── local automation ──────────────│              │
+└──────────────────┘                                    │              │
+                                                        │              │
+┌──────────────────┐       WSS (secret auth)            │              │
+│  Custom Client   │─── via @clawlines/sdk ─────────────│              │
+│  (Node / Deno)   │                                    │              │
+└──────────────────┘                                    │              │
+                                                        │              │
+                                              WSS ──────┘              │
+                                              (secret auth)            │
+                                                                       │
+                         ┌─────────────────────────────┐               │
+                         │  Channel Plugin (OpenClaw)   │               │
+                         │  + OpenClaw Agent            │               │
+                         │  (可运行在内网)               │               │
+                         └──────────────┬──────────────┘               │
+                                        │                              │
+                                   内部调用                             │
+                                        │                              │
+                         ┌──────────────▼──────────────┐               │
+                         │  OpenClaw Runtime            │               │
+                         │  (LLM / Tools / RAG)         │               │
+                         └─────────────────────────────┘               │
+                                                                       │
+                         ┌─────────────────────────────┐               │
+                         │  Supabase                    │◄──────────────┘
+                         │  ┌─────────┐  ┌───────────┐ │   PostgREST
+                         │  │PostgreSQL│  │  Storage  │ │   (HTTPS)
+                         │  │(消息持久化)│  │ (媒体文件) │ │
+                         │  └─────────┘  └───────────┘ │
+                         └─────────────────────────────┘
+```
+
 ## 连接方向
 
 这是 Clawline 和传统 Webhook 方案的**根本区别**：
@@ -65,6 +132,82 @@ OpenClaw Agent → Channel Plugin → Relay (/backend) → 路由到用户连接
 3. Relay 根据 `connectionId` 路由到对应客户端
 4. Client Web 实时渲染
 
+### 完整消息生命周期
+
+下图展示一条消息从用户输入到屏幕渲染的完整路径，包含所有中间事件：
+
+```
+ 用户键入消息
+      │
+      ▼
+ ┌────────────────────┐
+ │  SDK / clawChannel  │  构造 message.receive 事件
+ │  (客户端)           │  生成 messageId, senderId
+ └─────────┬──────────┘
+           │ WSS  ───  发送 JSON frame
+           ▼
+ ┌────────────────────┐
+ │  Gateway /client    │  验证 token, 检查限流 (30 msg/min)
+ │  (Relay)           │  持久化消息到 Supabase
+ └─────────┬──────────┘
+           │ 内部路由  ───  根据 channelId 查找后端连接
+           │ 触发 relay.client.event
+           ▼
+ ┌────────────────────┐
+ │  Gateway /backend   │  转发给匹配的 Channel Plugin
+ │  (Relay)           │
+ └─────────┬──────────┘
+           │ WSS  ───  relay.client.event frame
+           ▼
+ ┌────────────────────┐
+ │  Channel Plugin     │  解析消息, 转换为 OpenClaw 内部格式
+ │  (OpenClaw)        │  调用 Agent 处理
+ └─────────┬──────────┘
+           │ 内部调用
+           ▼
+ ┌────────────────────┐
+ │  OpenClaw Agent     │  LLM 推理, 工具调用, RAG 检索
+ │  (LLM Runtime)     │  生成流式回复
+ └─────────┬──────────┘
+           │ streaming tokens
+           ▼
+ ┌────────────────────┐
+ │  Channel Plugin     │  将 token 流包装为 text.delta 事件
+ │  (OpenClaw)        │  最终发送 message.send 完成事件
+ └─────────┬──────────┘
+           │ WSS  ───  text.delta / message.send frames
+           ▼
+ ┌────────────────────┐
+ │  Gateway /backend   │  接收后端消息
+ │  (Relay)           │  持久化回复到 Supabase
+ └─────────┬──────────┘
+           │ 内部路由  ───  根据 connectionId 路由到客户端
+           ▼
+ ┌────────────────────┐
+ │  Gateway /client    │  转发给对应的客户端 WebSocket
+ │  (Relay)           │
+ └─────────┬──────────┘
+           │ WSS  ───  text.delta / message.send frames
+           ▼
+ ┌────────────────────┐
+ │  SDK / clawChannel  │  逐 token 渲染 (text.delta)
+ │  (客户端)           │  message.send 时标记完成
+ └────────────────────┘
+           │
+           ▼
+      用户看到回复
+```
+
+**关键事件类型**：
+
+| 事件 | 方向 | 说明 |
+|------|------|------|
+| `message.receive` | Client -> Gateway | 用户发送的消息 |
+| `relay.client.event` | Gateway -> Backend | Gateway 转发给后端的客户端事件 |
+| `text.delta` | Backend -> Client | 流式回复的增量文本 |
+| `message.send` | Backend -> Client | 完整回复 / 流式结束信号 |
+| `ping` / `pong` | Client <-> Gateway | 心跳保活 |
+
 ### 文件上传
 
 ```
@@ -84,6 +227,85 @@ Client Web → Relay /api/media/upload → 返回 URL → 在消息中引用 URL
 - 客户端通过 `channelId` 参数选择连接哪个 Agent
 
 适用场景：一个 Relay 对接多个业务场景的 Agent。
+
+### 部署拓扑
+
+#### 单节点本地开发
+
+所有组件运行在同一台机器上，使用 `ws://` 明文连接：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     localhost                                │
+│                                                              │
+│  ┌──────────────┐   ws://localhost:19080/client              │
+│  │  Client Web  │◄──────────────────────────────┐            │
+│  │  (dev server)│                               │            │
+│  │  :5173       │                               │            │
+│  └──────────────┘                               │            │
+│                                          ┌──────┴─────────┐ │
+│                                          │  Gateway       │ │
+│  ┌──────────────┐                        │  (Relay)       │ │
+│  │  OpenClaw    │  ws://localhost:19080   │  :19080        │ │
+│  │  + Channel   │◄──────/backend─────────│                │ │
+│  │  Plugin      │                        │  Supabase 连接: │ │
+│  │  :4819       │                        │  HTTPS →云端   │ │
+│  └──────────────┘                        └────────────────┘ │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+启动命令：
+```bash
+# Terminal 1: Gateway
+cd gateway && node server.js
+
+# Terminal 2: OpenClaw + Channel Plugin
+cd openclaw && npm start
+
+# Terminal 3: Client Web
+cd client-web && npm run dev
+```
+
+#### 生产环境多节点部署
+
+Gateway 部署在公网，Agent 节点可以在内网：
+
+```
+                    ┌─────── 互联网 ────────┐
+                    │                        │
+┌───────────┐      │   ┌────────────────┐   │      ┌────────────────────┐
+│  用户 A   │─WSS──┼──▶│                │   │      │  内网 Node 1       │
+│  (浏览器)  │      │   │  反向代理       │   │      │                    │
+└───────────┘      │   │  Caddy/Nginx   │   │      │  ┌──────────────┐  │
+                    │   │  :443 (HTTPS)  │   │      │  │  OpenClaw    │  │
+┌───────────┐      │   │       │        │   │      │  │  Agent A     │  │
+│  用户 B   │─WSS──┼──▶│       │        │   │ WSS  │  │  + Channel   │  │
+│  (小程序)  │      │   │       ▼        │   │◄─────│  │  Plugin      │──┤
+└───────────┘      │   │  ┌──────────┐  │   │      │  └──────────────┘  │
+                    │   │  │ Gateway  │  │   │      └────────────────────┘
+┌───────────┐      │   │  │ (Relay)  │  │   │
+│  用户 C   │─WSS──┼──▶│  │ :19080   │  │   │      ┌────────────────────┐
+│  (SDK)    │      │   │  │          │  │   │      │  内网 Node 2       │
+└───────────┘      │   │  │    │     │  │   │      │                    │
+                    │   │  └────┼─────┘  │   │      │  ┌──────────────┐  │
+                    │   │       │        │   │ WSS  │  │  OpenClaw    │  │
+                    │   └───────┼────────┘   │◄─────│  │  Agent B     │  │
+                    │           │            │      │  │  + Channel   │  │
+                    │      PostgREST (HTTPS) │      │  │  Plugin      │──┤
+                    │           │            │      │  └──────────────┘  │
+                    │    ┌──────▼──────┐     │      └────────────────────┘
+                    │    │  Supabase   │     │
+                    │    │  (Cloud)    │     │
+                    │    └─────────────┘     │
+                    └────────────────────────┘
+```
+
+**要点**：
+- 反向代理 (Caddy/Nginx) 负责 TLS 终止，将 `wss://` 转为内部 `ws://`
+- Agent 节点主动连出到 Gateway，无需公网 IP 或开放入站端口
+- 多个 Agent 节点可同时连接同一 Gateway，每个绑定不同 Channel
+- Supabase 通过 HTTPS PostgREST API 访问，Gateway 使用 `service_role_key` 鉴权
 
 ## 鉴权体系
 

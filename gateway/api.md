@@ -276,6 +276,324 @@ curl -X POST https://relay.example.com/api/chat \
 
 ---
 
+### GET /api/settings
+
+获取通用 relay 设置（CORS 配置）。**需要管理鉴权**。
+
+设置持久化在 `cl_settings` 表的 `relay` 键中。
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "settings": {
+    "corsAllowedOrigins": ["https://app.example.com", "https://admin.example.com"]
+  },
+  "_env": {
+    "CORS_ALLOWED_ORIGINS": null
+  }
+}
+```
+
+- `settings`：数据库中的持久化设置
+- `_env.CORS_ALLOWED_ORIGINS`：环境变量的值（调试用）
+
+---
+
+### PUT /api/settings
+
+更新通用 relay 设置。**需要管理鉴权**。
+
+**请求体：**
+
+```json
+{
+  "corsAllowedOrigins": ["https://app.example.com"]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `corsAllowedOrigins` | `string[]` | CORS 允许源列表，空数组禁用 |
+
+增量合并，仅覆盖提供的字段。
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "settings": {
+    "corsAllowedOrigins": ["https://app.example.com"]
+  }
+}
+```
+
+**错误响应：**
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 400 | JSON 无效或解析错误 |
+| 401 | 鉴权失败 |
+
+---
+
+### GET /api/ai-settings
+
+获取 AI/LLM 配置。**需要管理鉴权**。
+
+API key 始终返回掩码占位符（`***configured***`）以防泄露。
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "llmEndpoint": "https://resley-east-us-2-resource.openai.azure.com/openai/v1",
+  "llmApiKey": "***configured***",
+  "llmModel": "gpt-5.4-mini",
+  "suggestionModel": "",
+  "replyModel": "",
+  "replyPrompt": "",
+  "voiceRefineModel": "",
+  "suggestionPrompt": "",
+  "voiceRefinePrompt": ""
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `llmEndpoint` | Azure OpenAI 端点 URL |
+| `llmApiKey` | 掩码 API key（未配置时为空） |
+| `llmModel` | 所有 AI 功能的默认模型 |
+| `suggestionModel` | 建议功能的模型覆盖（回退到 `llmModel`） |
+| `replyModel` | 回复草稿的模型覆盖 |
+| `voiceRefineModel` | 语音优化的模型覆盖 |
+| `replyPrompt` | 回复草稿的自定义系统提示词 |
+| `suggestionPrompt` | 后续建议的自定义系统提示词 |
+| `voiceRefinePrompt` | 语音优化的自定义系统提示词 |
+
+---
+
+### PUT /api/ai-settings
+
+更新 AI/LLM 配置。**需要管理鉴权**。
+
+**请求体：**
+
+```json
+{
+  "llmEndpoint": "https://your-resource.openai.azure.com/openai/v1",
+  "llmApiKey": "your-api-key",
+  "llmModel": "gpt-5.4-mini",
+  "suggestionModel": "gpt-5.4-mini",
+  "replyModel": "gpt-5.4-mini",
+  "voiceRefineModel": "gpt-5.4-mini",
+  "replyPrompt": "Custom prompt...",
+  "suggestionPrompt": "Custom prompt...",
+  "voiceRefinePrompt": "Custom prompt..."
+}
+```
+
+所有字段可选，增量合并。`llmApiKey` 为 `"***configured***"` 时忽略该字段，防止误覆盖。
+
+设置持久化在 `cl_settings` 表的 `ai` 键中。
+
+**响应 (200)：**
+
+```json
+{ "ok": true }
+```
+
+**错误响应：**
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 400 | JSON 无效或解析错误 |
+| 401 | 鉴权失败 |
+| 500 | Supabase 未配置或内部错误 |
+
+---
+
+### GET /api/messages
+
+分页查询持久化消息。**需要管理鉴权**。
+
+**Query 参数：**
+
+| 参数 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `channelId` | 否 | - | 按 channel 过滤 |
+| `direction` | 否 | - | 按 `inbound` 或 `outbound` 过滤 |
+| `limit` | 否 | `50` | 返回条数（最大 `200`） |
+| `offset` | 否 | `0` | 分页偏移 |
+
+按时间倒序返回（最新在前）。
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "messages": [
+    {
+      "id": "uuid",
+      "channel_id": "demo",
+      "sender_id": "alice",
+      "agent_id": "main",
+      "message_id": "msg-xxx",
+      "content": "Hello",
+      "content_type": "text",
+      "direction": "inbound",
+      "media_url": null,
+      "meta": null,
+      "timestamp": 1713000000000,
+      "created_at": "2025-04-14T00:00:00Z"
+    }
+  ],
+  "total": 42
+}
+```
+
+未配置 Supabase 时返回空列表（`total: 0`）。
+
+---
+
+### GET /api/messages/stats
+
+消息聚合统计，用于仪表盘图表。**需要管理鉴权**。
+
+返回最近 24 小时按小时统计的消息数、模型使用分布和按 channel 统计。统计基于最近 500 条消息。
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "hourly": [
+    { "hour": "00:00", "inbound": 5, "outbound": 8 },
+    { "hour": "01:00", "inbound": 2, "outbound": 3 }
+  ],
+  "models": [
+    { "name": "gpt-5.4-mini", "count": 42 },
+    { "name": "claude-opus-4-6", "count": 15 }
+  ],
+  "channels": [
+    { "name": "demo", "inbound": 20, "outbound": 35 },
+    { "name": "support", "inbound": 10, "outbound": 12 }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `hourly` | 24 个条目（每小时一个），含 `hour`（HH:MM）、`inbound` 和 `outbound` 计数 |
+| `models` | 出站消息 `meta.model` 的模型使用统计，按数量降序 |
+| `channels` | 按 channel 的入站/出站计数，按总数降序 |
+
+未配置 Supabase 时所有数组为空。
+
+---
+
+### POST /api/suggestions
+
+AI 驱动的后续建议或回复草稿生成。**需要管理鉴权或 Channel 用户鉴权**。
+
+两种模式：
+- `suggestions`（默认）：从用户角度生成 3-5 个后续建议
+- `reply`：为最后一条助手消息生成回复草稿
+
+**请求体：**
+
+```json
+{
+  "messages": [
+    { "role": "user", "text": "How do I deploy this?" },
+    { "role": "assistant", "text": "You can deploy using..." }
+  ],
+  "prompt": "Optional additional instructions",
+  "mode": "suggestions"
+}
+```
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `messages` | 否 | `[]` | 对话历史（建议模式取最后 6 条，回复模式取最后 10 条），文本截断到 300 字符 |
+| `prompt` | 否 | `""` | 附加到系统提示词的用户指令 |
+| `mode` | 否 | `"suggestions"` | `"suggestions"` 或 `"reply"` |
+
+**响应 (200) - suggestions 模式：**
+
+```json
+{
+  "ok": true,
+  "mode": "suggestions",
+  "suggestions": ["How do I deploy?", "Any alternatives?", "Tell me more"]
+}
+```
+
+**响应 (200) - reply 模式：**
+
+```json
+{
+  "ok": true,
+  "mode": "reply",
+  "reply": "Got it, I'll deploy it now."
+}
+```
+
+**错误响应：**
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 401 | 鉴权失败 |
+| 500 | LLM API key 未配置、LLM 请求失败或内部错误 |
+
+---
+
+### POST /api/voice-refine
+
+使用 AI 优化语音转写文本。修正识别错误、去除填充词、改善语法同时保留原意。**需要管理鉴权或 Channel 用户鉴权**。
+
+**请求体：**
+
+```json
+{
+  "text": "嗯那个就是我想问一下怎么怎么部署这个项目",
+  "messages": [
+    { "role": "user", "text": "Previous message context" },
+    { "role": "assistant", "text": "Response context" }
+  ],
+  "prompt": "Optional additional instructions"
+}
+```
+
+| 字段 | 必填 | 默认值 | 说明 |
+|------|------|--------|------|
+| `text` | 是 | - | 待优化的原始语音转写文本 |
+| `messages` | 否 | `[]` | 近期对话历史（取最后 20 条），文本截断到 300 字符 |
+| `prompt` | 否 | `""` | 附加到系统提示词的用户指令 |
+
+**响应 (200)：**
+
+```json
+{
+  "ok": true,
+  "refined": "我想问一下怎么部署这个项目"
+}
+```
+
+**错误响应：**
+
+| HTTP 状态码 | 场景 |
+|------------|------|
+| 400 | `text` 为空或缺失 |
+| 401 | 鉴权失败 |
+| 500 | LLM API key 未配置、LLM 请求失败或内部错误 |
+
+---
+
 ### GET /api/messages/sync
 
 同步消息历史，支持正向和反向分页。**需要管理鉴权或 Channel 鉴权**。
@@ -644,3 +962,99 @@ Access-Control-Max-Age: 86400
 | 404 | channel/user/文件不存在 |
 | 413 | 上传文件超过 10 MB 限制 |
 | 500 | 服务器内部错误 |
+
+---
+
+## 运维细节
+
+### 限流
+
+网关所有限流均使用**令牌桶**算法。
+
+| 层级 | 限制 | 窗口 | 维度 |
+|------|------|------|------|
+| HTTP 请求 | 100 次 | 1 分钟 | 按 IP |
+| WebSocket 消息 | 30 条 | 1 分钟 | 按连接 |
+| WebSocket 连接 | 50 并发 | - | 按 IP |
+
+**超限行为：**
+
+- HTTP：返回 `429 Too Many Requests`
+- WS 消息：静默丢弃并关闭连接（code `1008`）
+- WS 连接：拒绝 upgrade 请求
+
+**清理：** 每 5 分钟清理空闲超过 5 分钟的 HTTP 限流桶。
+
+---
+
+### Logto JWT 鉴权
+
+JWT 验证使用 [jose](https://github.com/panva/jose) 库和远程 JWKS 端点。
+
+| 参数 | 值 |
+|------|---|
+| JWKS 端点 | `${LOGTO_ENDPOINT}/oidc/jwks`（默认: `https://logto.dr.restry.cn/oidc/jwks`） |
+| Issuer | `${LOGTO_ENDPOINT}/oidc` |
+| Audience | `LOGTO_API_RESOURCE` 环境变量（默认: `https://gateway.clawlines.net/api`） |
+
+**流程：**
+
+1. 提取 `Authorization: Bearer <token>` header
+2. 使用远程 JWKS 密钥集验证 JWT 签名（`jose` 缓存密钥）
+3. 验证 `iss` 和 `aud` claims
+4. 成功则视为完全鉴权（等同 admin token）
+5. 失败（过期、签名无效、audience 不匹配）则降级到下一个鉴权方式
+
+鉴权检查顺序：admin token → Logto JWT。`requireAuthAny` 端点最后检查 channel user token。
+
+---
+
+### 媒体文件生命周期
+
+| 阶段 | 详情 |
+|------|------|
+| 存储目录 | `${CL_DATA_DIR}/media/`（启动时创建） |
+| 最大文件大小 | 10 MB (`MEDIA_MAX_BYTES`) |
+| TTL | 7 天（基于文件修改时间） |
+| 清理间隔 | 每 1 小时 |
+| 文件命名 | `<uuid>.<ext>`，不保留原文件名 |
+| 公开 URL | `GET /api/media/<filename>`（无需鉴权，`Cache-Control: public, max-age=86400`） |
+
+**支持的 MIME 类型（按扩展名推断）：**
+
+| 类别 | 扩展名 |
+|------|--------|
+| 图片 | `.jpg` `.jpeg` `.png` `.gif` `.webp` `.svg` |
+| 音频 | `.mp3` `.ogg` `.wav` |
+| 视频 | `.mp4` `.webm` |
+| 文档 | `.pdf` |
+
+**上传方式：** multipart form-data、JSON base64 编码 `data` 字段、或 raw binary body + `Content-Type` header。详见上方 `POST /api/media/upload`。
+
+**清理机制：** `setInterval` 定时器每小时运行，遍历媒体目录，删除 `mtime` 超过 7 天的文件。
+
+---
+
+### 虚拟连接（POST /api/chat 内部机制）
+
+`/api/chat` 端点创建**虚拟 WebSocket 连接**，将 HTTP 请求/响应桥接到现有 WebSocket 消息流。
+
+**生命周期：**
+
+1. 验证鉴权和请求体
+2. 生成虚拟连接 ID（`api-<uuid>`）和消息 ID（`api-<timestamp>-<short-uuid>`）
+3. 入站消息持久化到 Supabase（`meta.source: "api"`）
+4. 广播入站消息到该 channel 所有已连接的 WS 客户端
+5. 在 `global._apiCallbacks` 中注册回调
+6. 在 `clientConnections` 中插入虚拟条目（`ws: null`、`isApi: true`）
+7. 向 backend 发送 `relay.client.open`，等待 50ms，发送 `relay.client.event`
+8. 等待 backend 通过 `relay.server.event` 回复 `message.send` 事件
+9. 收到回复：清除超时、提取响应内容、返回 HTTP 200
+10. **清理（始终执行）：** 删除回调和虚拟连接条目，向 backend 发送 `relay.client.close`
+
+| 参数 | 值 |
+|------|---|
+| 超时 | 120 秒（超时返回 HTTP 504） |
+| 连接 ID 格式 | `api-<uuid>` |
+| Backend 通知 | 收到 `relay.client.open` / `relay.client.event` / `relay.client.close`，与真实客户端相同 |
+| 消息持久化 | 入站和出站消息均持久化，带 `meta.source: "api"` |

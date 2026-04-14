@@ -21,6 +21,7 @@ export default defineConfig({
       { text: 'Relay Gateway', link: '/gateway/' },
       { text: 'Channel Plugin', link: '/channel/' },
       { text: 'Client Web', link: '/client-web/' },
+      { text: 'Client WeChat', link: '/client-wechat/' },
       { text: 'SDK', link: '/sdk/' },
     ],
 
@@ -33,6 +34,7 @@ export default defineConfig({
             { text: '架构概览', link: '/guide/architecture' },
             { text: '快速开始', link: '/guide/quickstart' },
             { text: 'Browser Agent', link: '/guide/browser-agent' },
+            { text: '故障排查', link: '/guide/troubleshooting' },
           ]
         }
       ],
@@ -44,6 +46,7 @@ export default defineConfig({
             { text: '部署指南', link: '/gateway/deploy' },
             { text: 'API 参考', link: '/gateway/api' },
             { text: '管理后台', link: '/gateway/admin-ui' },
+            { text: '数据库', link: '/gateway/database' },
           ]
         }
       ],
@@ -53,10 +56,14 @@ export default defineConfig({
           items: [
             { text: '概述', link: '/channel/' },
             { text: '安装配置', link: '/channel/setup' },
+            { text: '配置参考', link: '/channel/configuration' },
             { text: '接入指南', link: '/channel/INTEGRATION_GUIDE' },
             { text: '配置示例', link: '/channel/CONFIG_EXAMPLES_ZH' },
             { text: '主动 DM', link: '/channel/PROACTIVE_DM' },
             { text: 'ACP 线程', link: '/channel/acp-threads' },
+            { text: '高级功能', link: '/channel/advanced-features' },
+            { text: '事件参考', link: '/channel/events-reference' },
+            { text: 'API Reference', link: '/channel/api-reference' },
           ]
         }
       ],
@@ -71,6 +78,15 @@ export default defineConfig({
           ]
         }
       ],
+      '/client-wechat/': [
+        {
+          text: 'Client WeChat',
+          items: [
+            { text: '概述', link: '/client-wechat/' },
+            { text: '高级指南', link: '/client-wechat/advanced' },
+          ]
+        }
+      ],
       '/sdk/': [
         {
           text: 'Client SDK',
@@ -78,6 +94,7 @@ export default defineConfig({
             { text: '概述', link: '/sdk/' },
             { text: '快速开始', link: '/sdk/quickstart' },
             { text: 'API 参考', link: '/sdk/api' },
+            { text: 'Advanced Usage', link: '/sdk/advanced' },
           ]
         }
       ],
