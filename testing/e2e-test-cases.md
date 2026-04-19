@@ -61,14 +61,16 @@ SUPABASE_URL / KEY   仅 sql 类用例需要
 
 ## 1. Web 客户端 — 登录与配对
 
+> **Onboarding flag**：首次完成 Get Started 后会写入 `localStorage['clawline.onboarding.done'] = '1'`，后续访问即使无 connection 也直接进 `/chats` 而不再显示 Onboarding。测试用例通过显式清除该 flag 来复现"首次访问"状态，无需使用 Incognito 或 logout。
+
 | ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
 |---|---|---|---|---|---|
-| W-01 | 首次访问未登录显示 Onboarding | `openclaw.connections` 不存在 | 访问 `http://localhost:4026/` | 渲染 "Your agents, one tap away" + Get Started 按钮 | BA |
-| W-02 | 已登录且有连接则直接进 `/chats` | localStorage 存在至少 1 个 connection | 访问 `/` | 自动 redirect `/chats`，渲染 sidebar | BA |
-| W-03 | Get Started → Logto OIDC 跳转 | 无登录态 | 点 Get Started | 跳到 `logto.dr.restry.cn/oidc/auth?...&redirect_uri=<WEB_URL>/callback` | BA |
-| W-04 | OIDC 回调入库 | Logto 已授权 | 登录后回到 `/callback` | 2 秒内跳 `/chats`，`openclaw.userId` 已写入 | BA |
-| W-05 | Pair — 手动输入 ws URL | 登录态，0 connection | `/pairing` → Manual → 填 `ws://localhost:8080/ws?token=abc`，chatId `dev` | `openclaw.connections` 数组新增一项，重定向到 `/chats` | BA |
-| W-06 | Pair — 非法 URL 校验 | 同上 | 填 `not-a-url` | 停留在表单并提示错误；localStorage 无变化 | BA |
+| W-01 | 首次访问未登录显示 Onboarding | `localStorage.removeItem('clawline.onboarding.done')` → 刷新 `/` | 访问 `http://localhost:4026/` | 渲染 "Your agents, one tap away" + Get Started 按钮 | BA |
+| W-02 | 已登录或已完成 onboarding 则直接进 `/chats` | localStorage 存在至少 1 个 connection **或** `clawline.onboarding.done='1'` | 访问 `/` | 自动 redirect `/chats`，渲染 sidebar | BA |
+| W-03 | Get Started → Logto OIDC 跳转 | 清除 onboarding flag；无登录态 | 点 Get Started | 跳到 `logto.dr.restry.cn/oidc/auth?...&redirect_uri=<WEB_URL>/callback`（此用例需真实 Logto，CI 中 SKIP） | BA |
+| W-04 | OIDC 回调入库 | Logto 已授权 | 登录后回到 `/callback` | 2 秒内跳 `/chats`，`openclaw.userId` 已写入（需真实 Logto，CI 中 SKIP） | BA |
+| W-05 | Pair — 手动输入 ws URL | 清除 onboarding flag + `openclaw.connections`；登录态 | 点 Get Started → `/pairing` → Manual → 填 `ws://localhost:8080/ws?token=abc`，chatId `dev` | `openclaw.connections` 数组新增一项，重定向到 `/chats` | BA |
+| W-06 | Pair — 非法 URL 校验 | 同 W-05 | 在 pairing 表单填 `not-a-url` | 停留在表单并提示错误；localStorage `openclaw.connections` 无变化 | BA |
 
 ## 2. Web 客户端 — 聊天核心流程
 
