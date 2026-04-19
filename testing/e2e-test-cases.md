@@ -335,3 +335,86 @@ POST /api/chat
 | API-CHAT-40 | 1 发 = 2 行 | 同 fires | API-CHAT-01 完成后查 `cl_messages?message_id=eq.<inboundMessageId>` 与 `?meta->>source=eq.api&order=timestamp.desc&limit=2` | inbound 1 行 (direction='inbound', meta.source='api') + outbound 1 行 (direction='outbound', meta.source='api', replyTo=inboundMessageId) | curl + sql |
 | API-CHAT-41 | timeout 后 outbound 仍持久化 | API-CHAT-11 触发 504 后 | 30s 后查 cl_messages | inbound 始终在；outbound 在 backend 实际回包时入库（最终一致） | sql |
 | API-CHAT-42 | 重复 inboundMessageId 去重 | — | 服务端不会重复（每次 randomUUID）；测：手工同 message_id POST → ws 走（同 G-44），DB 始终唯一 | `(message_id, direction)` unique constraint 生效 | sql |
+
+---
+
+## 16. Thread / 子区（端到端 + API + Web E2E）
+
+> 对应 PRD P0 #3 闭环。覆盖 thread CRUD、reply 路由、mark_read 跨设备、ACP 自动建 thread、并发安全、`/api/chat × thread`、边界。修复见 commit `c460abe..ad8fc92`。
+
+**WS event schema reference**（按实现整理）：
+
+| Event | Direction | Required fields | Optional fields |
+|---|---|---|---|
+| `thread.create` | client→relay | `parentMessageId` | `title`, `type`, `requestId` |
+| `thread.get` | client→relay | `threadId` | `requestId` |
+| `thread.list` | client→relay | — | `channelId`, `status` (default `active`, or `all`), `participantId`, `page`, `limit`/`pageSize` (默认 20，max 100), `requestId` |
+| `thread.update` | client→relay | `threadId` | `title`, `status`, `requestId` |
+| `thread.delete` | client→relay | `threadId` | `requestId` |
+| `thread.mark_read` | client→relay | `threadId` | `userId` (default 来自 auth), `requestId` |
+| `thread.search` | client→relay | `threadId`, `query` | `requestId` |
+| `thread.updated` | relay→client | broadcast on create/update/delete/new-reply/mark_read; payload `{thread}` 或 `{threadId, readState:{userId,lastReadAt}}` | — |
+| `thread.new_reply` | relay→client | broadcast on each reply | `{threadId, messageId, senderId, preview}` |
+
+### 16.1 基本 (5)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-01 | thread.create | WS 已连，pick existing messageId 作为 parentMessageId；发 `{type:"thread.create",data:{parentMessageId,title:"e2e-01",requestId}}` | 收 `thread.create` 含完整 thread 对象；同 channel sibling 收到 `thread.updated` 广播 | wscat ×2 + sql |
+| THREAD-02 | thread.list 默认+limit+status | 发 `{type:"thread.list",data:{limit:3}}`；再发 `{...,limit:3,status:"all"}` | 默认 status=active 过滤；limit=3 返 ≤3；status=all 含 archived | wscat |
+| THREAD-03 | thread.get with unreadCount | 已 mark_read 一个 thread → thread.get | 返回完整 thread + `unreadCount` 字段（数值） | wscat + sql |
+| THREAD-04 | thread.update title | thread.update {threadId, title:"new"} | 收 `thread.update` 响应 + sibling 收 `thread.updated` | wscat ×2 |
+| THREAD-05 | thread.delete soft | thread.delete {threadId} | thread.status='deleted'；sibling 收 `thread.updated` | wscat + sql |
+
+### 16.2 Reply 路由（TH-1 关键，3）
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-10 | thread 内消息 → agent reply 带 threadId | 在已存在 threadId 内发 `message.receive {threadId:T}` | agent 回复 `message.send` 带 `data.threadId === T`；DB cl_messages.thread_id=T | wscat + sql |
+| THREAD-11 | fresh chatId 首次 thread 回复（无 session binding） | 用全新 chatId+threadId 发 message.receive | 同上：reply 仍带 threadId（fallback inbound） | wscat + sql |
+| THREAD-12 | 主聊天 vs thread 混发分流 | 同 chatId 内交替发：A 主聊天，B threadId=T，C 主聊天，D threadId=T | A/C 的 reply 不带 threadId；B/D 的 reply 带 threadId=T | wscat + sql |
+
+### 16.3 mark_read 跨设备 (TH-3，2)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-20 | 设备 A mark_read → 设备 B 收广播 | 两个 WS 连接同 channel；A 发 `thread.mark_read` | A 收响应；B 收 `thread.updated {threadId, readState:{userId,lastReadAt}}` | wscat ×2 |
+| THREAD-21 | mark_read 后 thread.list unread=0 | mark_read，再 thread.list | 该 thread 的 `unreadCount=0` | wscat |
+
+### 16.4 ACP 自动建 thread (TH-4，2)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-30 | ACP spawn 注册到 cl_threads | 触发 `/acp spawn ... --thread auto` 于真实 fires backend | DB cl_threads 新增 `type='acp'` 行 | sql + manual |
+| THREAD-31 | Supabase 失败 → 错误日志 (不 silent) | 模拟无效 RELAY_SUPABASE_*（环境层，跳过实测）| 代码：`session-bindings.ts` 当 hooks 缺失 → `console.warn` 含明确的指引 | code review |
+
+### 16.5 并发安全 (TH-5，2)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-40 | 5 条并发同 thread reply → reply_count=5 | 在同一 threadId 内并发 5 条 message.receive | DB cl_threads.reply_count 增量精确等于 5（无 race） | script + sql |
+| THREAD-41 | 同上消息全部带 thread_id 入库 | 同上 | `cl_messages WHERE thread_id=T` count=5 | sql |
+
+### 16.6 API Chat × Thread (TH-2 关键，3)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-50 | `POST /api/chat` 带 threadId → reply 落 thread | curl 带 `body.threadId` | HTTP 200，agent 回复落该 thread；DB outbound `thread_id=T` | curl + sql |
+| THREAD-51 | API 发 + Web 在线 → Web 收 inbound+outbound（同 thread） | WS listener 在同 chatId+threadId；POST /api/chat 带 threadId | Web 收到 inbound echo + outbound message.send，二者均带 `data.threadId=T` | wscat + curl |
+| THREAD-52 | 无效 threadId → 400 | curl 带 `threadId="ghost"` | HTTP 400 `threadId not found in channel <c>` | curl |
+
+### 16.7 边界 (TH-6/7，3)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-60 | thread.search on deleted thread | 先 thread.delete，再 thread.search | 收响应 `{error:"thread is deleted"}` | wscat + sql |
+| THREAD-61 | thread.search query=空 → 400 | 发 `{type:"thread.search",data:{threadId,query:""}}` | 收 `{error:"query is required"}` | wscat |
+| THREAD-62 | 客户端 thread 消息按 timestamp 排序 | UI E2E：人为构造乱序消息 | UI 渲染按 timestamp 排序 | browser-agent |
+
+### 16.8 文档/契约 (TH-8，2)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| THREAD-70 | docs reference matches impl | code-review | 上面 schema 表与 `gateway/server.js` 实现一致 | review |
+| THREAD-71 | thread.* 7 events 文档完备 | 文档存在 + 用 wscat 探测每个 event 都返回结构化结果 | thread.create/get/list/update/delete/mark_read/search 全部协议字段对齐 | wscat + review |
+
