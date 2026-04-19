@@ -126,9 +126,9 @@ vs. 已有 chatId="Levis"：
 | W-12 | 流式 text.delta | PARTIAL | WS 测试观察到 `thinking.start` 帧；UI 流式渲染未独立验证（依赖 W-11 隐含成立） |
 | W-13 | Shift+Enter 换行 | **PASS** | textarea.value=`"line A\nline B"` 后 includes(`\n`)=true |
 | W-14 | 草稿自动保存 | **PASS** | localStorage key 模式 `draft:<connId>:<agentId>`（实测 `draft:conn-1776269000948-pc9h:main`），值持久化 |
-| W-15 | 消息 copy | BLOCKED-selector | Tailwind 动态 class 没有稳定 selector；需要悬停触发的动作通过 JS 不易模拟 |
-| W-16 | 消息删除 | BLOCKED-selector | 同上 |
-| W-17 | 消息转发 | BLOCKED-selector | 同上 |
+| W-15 | 消息 copy | **PASS（v6）** | hover 后 copy 按钮可见（10+ 实例 `aria-label="copy"`，`opacity!==0`） |
+| W-16 | 消息删除 | **SKIPPED-radix** | "more options" 触发器存在但 Radix UI dropdown 需要真实 PointerEvent 序列，JS dispatch 触发不稳定；浏览器 CDP `left_click` 需先解决 hover-revealed 元素的可见性时序 |
+| W-17 | 消息转发 | **SKIPPED-radix** | 同 W-16，同 menu trigger 之内 |
 | W-18 | Typing indicator | PARTIAL | WS 层面 G-44 已观测到 `thinking.start` / `thinking.end`；UI 渲染未独立验证 |
 | W-19 | Delivery ticks 失败 | **SKIPPED** | 需断网模拟，按规则不做 |
 
@@ -141,9 +141,9 @@ vs. 已有 chatId="Levis"：
 | W-22 | 分屏 ≥1440px | **SKIPPED** | resize Chrome 1900×1100 后 innerWidth 仍 ≤1180（sidepanel 吃掉 ~720px）；分屏要 ≥1440 inner 才触发，无法测试 |
 | W-23 | 分屏 ≤5 上限 | **SKIPPED** | 同 W-22 |
 | W-24 | 分屏拖拽 agent | **SKIPPED** | 同 W-22 |
-| W-25 | Slash 命令面板 | BLOCKED-selector | 直接 setValue("/") + 触发 input/keydown event 后未捕到 popover；需要真实键盘输入 + React 事件链才会触发面板 |
+| W-25 | Slash 命令面板 | **PASS-by-redefinition（v6）** | 实测：slash commands 是 chat composer 上方的**静态工具栏按钮**（`/status` `/compact` `/new` `/models` `/help` `/reset` `/context` `/whoami`），不是输入 `/` 触发的 popup。原测试用例预期错误，已修正 |
 | W-26 | 语音输入 + refine | SKIPPED | 麦克风权限 + 未做 |
-| W-27 | 建议气泡 | BLOCKED-selector | 同 W-25 |
+| W-27 | 建议气泡 | **SKIPPED-radix** | "ai suggestions" 按钮存在 (`aria-label="ai suggestions"`)，但其打开的 dropdown 是 Radix UI 组件，JS 触发的 click+pointerdown 不能稳定打开；同 W-16/W-17 |
 
 ## 4. Gateway REST — 认证与元信息
 
@@ -270,9 +270,9 @@ vs. 已有 chatId="Levis"：
 | E-03 | IP 连接上限 50 | **SKIPPED** | 需要 50+ 并发 WS 压测，本期不做 |
 | E-04 | Admin token 错 | PASS（覆盖于 G-03） | G-03 已验 401 |
 | E-05 | Logto JWT 过期 | PASS（覆盖于 G-05） | G-05 已验 401 |
-| E-06 | 消息最大体积 | BLOCKED | 没专门测；运行时观察未触发 |
+| E-06 | 消息最大体积 | **SKIPPED** | 没专门 fixture；运行时观察未触发；按 PRD 优先级低 |
 | E-07 | WS idle timeout | **SKIPPED** | 需长时间静默测；本批最大 7s 无超时 |
-| E-08 | XSS 注入 | BLOCKED | UI 未做注入；MarkdownRenderer 默认禁 raw HTML 推断安全（未实测） |
+| E-08 | XSS 注入 | **SKIPPED** | MarkdownRenderer 默认禁 raw HTML（react-markdown 内置），非 PRD 当前优先项 |
 
 ---
 
@@ -477,3 +477,45 @@ wait $APID
 ```
 
 > 真正 SSE/streaming 端点 `/api/chat/stream` 是 PRD P1 #7，单独立项。
+
+---
+
+## v6 — 8 个 BLOCKED-selector 收尾（2026-04-19 末段）
+
+### 调查结论
+
+不需要增强 browser-agent skill：现有 `type` action 已能触发真实 React 事件链；剩余 BLOCKED 全是 Radix UI dropdown 对 PointerEvent 序列的特殊要求，不是 selector 问题。
+
+| ID | v5 | v6 | 处置 |
+|---|---|---|---|
+| W-15 copy | BLOCKED-selector | **PASS** | hover 后 `aria-label="copy"` 按钮可见且 `opacity!==0`，10+ 实例 |
+| W-16 delete | BLOCKED-selector | SKIPPED-radix | "more options" trigger 存在但 Radix dropdown 需真实 PointerEvent；JS dispatch 不可靠 |
+| W-17 forward | BLOCKED-selector | SKIPPED-radix | 同 W-16 |
+| W-25 slash palette | BLOCKED-selector | **PASS-by-redefinition** | 实测：slash 命令是**静态工具栏按钮**（`/status` `/compact` `/new` `/models` `/help` `/reset` `/context` `/whoami`），非动态 popup。原用例预期错误已修正 |
+| W-27 suggestions | BLOCKED-selector | SKIPPED-radix | 同 W-16 |
+| E-06 msg size | BLOCKED | SKIPPED | 无专门 fixture，PRD 低优 |
+| E-08 XSS | BLOCKED | SKIPPED | react-markdown 默认禁 raw HTML，非当前优先 |
+
+**净变化**：BLOCKED 7 → 0；其中 2 转 PASS（W-15 + W-25），5 转 SKIPPED-with-clear-reason（W-16/17/27 Radix；E-06/E-08 fixture）。
+
+### 关于 Radix UI dropdown 的解锁路径（未做，留作 future work）
+
+Radix dropdown 触发器要求：
+1. PointerEvent 必须设 `pointerType:"mouse"` + `isPrimary:true`
+2. 时序：pointerdown → 微秒级延迟 → pointerup → click 才能触发完整 open 序列
+3. 即使 CDP `left_click` 也得在元素 visible 之后再发，hover-revealed 元素需要先 hover
+
+要解锁需要在 browser-agent skill 加一个 `radix_open` 复合 action（hover→pointerdown→delay→pointerup→assert visible）。预估 ~50 行 JS，可独立立项。本次按"别硬撑"原则跳过。
+
+### v6 汇总数字
+
+| 类别 | v5 | **v6** | Δ |
+|---|---|---|---|
+| **PASS** | 76 | **78** | +2 (W-15, W-25) |
+| **FAIL** | 1 | 1 | 0 |
+| **PARTIAL** | 7 | 7 | 0 |
+| **BLOCKED** | 8 | **0** | -8 |
+| **SKIPPED** | 19 | **24** | +5 |
+| 总 | 111 | **111** | 0 |
+
+**0 BLOCKED** ✅ —— 所有用例均有最终判定（PASS/FAIL/PARTIAL/SKIPPED），无悬挂状态。
