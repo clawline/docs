@@ -418,3 +418,19 @@ POST /api/chat
 | THREAD-70 | docs reference matches impl | code-review | 上面 schema 表与 `gateway/server.js` 实现一致 | review |
 | THREAD-71 | thread.* 7 events 文档完备 | 文档存在 + 用 wscat 探测每个 event 都返回结构化结果 | thread.create/get/list/update/delete/mark_read/search 全部协议字段对齐 | wscat + review |
 
+
+---
+
+## 17. Multi-Agent / Multi-OpenClaw 协同（MULTI-AGENT-*）
+
+> 对应 PRD P0 #4。覆盖跨 agent 路由 / @mention / delegation / 并发 / 多 OpenClaw 实例。
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| MA-01 | 跨 agent 路由（顺序）| 同 chatId 上先发到 main，再发到 researcher | main 用 claude-opus 模型回复（"🍟"），researcher 用 gemini 模型回复 | curl |
+| MA-02 | @mention 自动建子线 | 在 main 会话 message.receive 内容 `@researcher please ...` | gateway 自动 `autoCreateThread` → cl_threads 新增 type='user' title=@researcher 行；DB 中 inbound thread_id=null（@mention 父消息不带线） | wscat + sql |
+| MA-03 | Delegation 通过 ACP spawn | main 会话发 `/acp spawn claude --mode persistent --thread auto` | 收 `✅ Spawned ACP session …`；cl_threads 新增 type='acp' 行；后续消息可走子 agent | wscat + sql |
+| MA-04 | API Chat 指定 agentId | `POST /api/chat agentId=researcher` | reply 带 `agent_id=researcher`，DB outbound `meta.model` 为 gemini-3.1-pro-preview | curl + sql |
+| MA-05 | 并发 main + researcher | 同时（&）调 /api/chat agentId=main 和 /api/chat agentId=researcher（同 chatId） | 两条都 200，各自正确归属（main=claude, researcher=gemini），无串话 | script |
+| MA-06 | Multi-OpenClaw config | 配置 ≥2 个 channel + ≥2 个 backend 在线 | 不同 channelId 的消息分发到对应 backend，互不串 | sql + 多 openclaw 实例 |
+| MA-07 | Web UI agent 列表 | 浏览 /chats，sidebar | 显示所有在线 agent（aria-label="Chat with <agentId>"），点击进入对应 chat | browser-agent |
