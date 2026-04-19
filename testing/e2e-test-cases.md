@@ -434,3 +434,72 @@ POST /api/chat
 | MA-05 | 并发 main + researcher | 同时（&）调 /api/chat agentId=main 和 /api/chat agentId=researcher（同 chatId） | 两条都 200，各自正确归属（main=claude, researcher=gemini），无串话 | script |
 | MA-06 | Multi-OpenClaw config | 配置 ≥2 个 channel + ≥2 个 backend 在线 | 不同 channelId 的消息分发到对应 backend，互不串 | sql + 多 openclaw 实例 |
 | MA-07 | Web UI agent 列表 | 浏览 /chats，sidebar | 显示所有在线 agent（aria-label="Chat with <agentId>"），点击进入对应 chat | browser-agent |
+
+---
+
+## 18. Inbox 不退化（INBOX-*）
+
+> 对应 PRD P0 #6。目的：在 P0 #1~#5 闭环后，确保 Inbox 现有功能不退化。**不做新功能 / 不做持久化 / 不做自动回复。**
+
+### 18.1 入口与导航
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-01 | BottomNav Inbox 入口 | navigate `/chats`，点 BottomNav 的 Inbox 项 | URL → `/inbox`；页面渲染 SummaryBar + 卡片网格 | BA |
+| INBOX-02 | unread badge 显示 | 至少 1 agent `status='pending_reply'` | BottomNav Inbox icon 上有 badge，数 = `getUnreadTotal()` 全局未读数；超过 99 显示 "99+" | BA |
+
+### 18.2 SummaryBar (Top Stats)
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-10 | 4 元数 SummaryBar | 进入 /inbox | 渲染 2×2 grid：「待回复」「思考中」「在线」「未读消息」四块；数字 = state.counts | BA |
+| INBOX-11 | pending/thinking 高亮 | 模拟 status='pending_reply' 的 item | 「待回复」卡片有 ring-orange，「思考中」有 ring-cyan | BA |
+
+### 18.3 Inbox 列表与状态
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-20 | 渲染 agent 列表 | 进入 /inbox | items 至少 1 个，每张卡含：emoji + agentName + status badge + lastMessage preview | BA |
+| INBOX-21 | 状态徽标 + 颜色 | 各 status 切换 | pending_reply=橙+pulse，thinking=青+pulse，idle=灰，offline=红 | BA |
+| INBOX-22 | 排序：lastMessage timestamp DESC | 多 agent，已知 lastMessage 时间 | 卡片按 timestamp 倒序，pending_reply > thinking > idle > offline | BA |
+| INBOX-23 | unread red pill | item.unreadCount > 0 | 卡片右上角红色圆 pill，>99 显示 "99+"，=0 隐藏 | BA |
+| INBOX-24 | 空 Inbox state | items.length=0 | 渲染 EmptyState「No Agents Yet」 | BA |
+
+### 18.4 卡片展开 / mark_read
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-30 | 点击展开 → markAsRead | 点未读卡片 | 卡片高度展开（spring），unreadCount 立刻 → 0；localStorage `openclaw.inbox.lastRead.{conn}.{agent}` 写入当前时间戳 | BA |
+| INBOX-31 | 跨界面 lastRead 同步 | Inbox 内 markAsRead 后进 ChatRoom 同 agent | ChatRoom 也认为已读，不重复显示 unread | BA |
+| INBOX-32 | recentMessages 渲染 | 卡片展开 | 显示最近 ≤5 条消息，user 右侧蓝底，AI 左侧白底；markdown 渲染 | BA |
+
+### 18.5 内联回复
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-40 | textarea 输入 + Enter 发送 | 卡片展开 → 输入文字 → Enter | 调 `channel.sendText` → 立即 append 到 recentMessages（skipReloadRef 防重）→ 清空输入 | BA |
+| INBOX-41 | Send 按钮 disabled 态 | 输入框为空 | Send 按钮 opacity-50 disabled；输入后变 primary 色 enabled | BA |
+
+### 18.6 Suggest Reply（手动）
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-50 | Suggest Reply 调 /api/suggestions | 卡片展开 → 点 "Suggest Reply" / 草稿按钮 | 调 `POST /api/suggestions` mode='reply'（带最近 20 条消息）；loading spinner；返回后 textarea 自动填入；可继续编辑 | BA + curl 抓 network |
+| INBOX-51 | Open Chat 跳转 | 点 "Open Chat" 链接 | navigate to `/chat/{agentId}?connectionId=...` | BA |
+
+### 18.7 DigestPanel + Auto-action
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-60 | DigestPanel 折叠/展开 | 点击 Sparkles 切换器 | spring 高度动画；只有 items.length > 0 时渲染 | BA |
+| INBOX-61 | 生成 Summary | 点 "✨ Generate Summary" | 调 draftReply 拼 status 摘要 → markdown 渲染在面板内；loading 期间 spinner | BA |
+| INBOX-62 | Pending agent "生成回复" | pending_reply 状态卡 | DigestPanel 显示 "生成回复" 按钮（橙），点后调 draftReply + sendText + recordUserMessage | BA |
+| INBOX-63 | Stale agent "催更" | idle 且 lastMessage > 30 min | DigestPanel 显示 "催更" 按钮（蓝），点后发 "有进展吗？请更新状态。" | BA |
+
+### 18.8 状态/数据驱动
+
+| ID | 标题 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|
+| INBOX-70 | localStorage `openclaw.inbox.cache` 持久化 | 任意状态变化 | cache 序列化（不含 suggestedReply）；下次进入 Inbox 立即可见 | BA + ls inspect |
+| INBOX-71 | `openclaw:inbox-updated` event 订阅 | 触发 inbox state 改变 | 所有 onInboxUpdate 订阅者收到 event，BottomNav badge 更新 | BA |
+
