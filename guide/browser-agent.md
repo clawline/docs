@@ -131,13 +131,16 @@ Agent 通过 `computer` 工具执行以下操作：
 |------|------|
 | `read_page` | 获取页面无障碍树 |
 | `find` | 自然语言搜索页面元素 |
-| `form_input` | 设置表单值 |
+| `form_input` | 设置单个表单值 |
+| `batch_form_input` | 批量设置多个表单值（一次调用填写多个字段） |
 | `navigate` | 页面导航或浏览历史 |
 | `get_page_text` | 提取页面纯文本 |
 | `tabs_create` | 创建新标签页 |
 | `tabs_context` | 列出所有标签页 |
 | `read_console_messages` | 读取控制台日志 |
 | `read_network_requests` | 读取网络请求 |
+| `resize_window` | 调整浏览器窗口大小 |
+| `emulate_device` | 设备模拟（手机/平板视口、UA、触摸、DPR） |
 | `javascript_tool` | 执行 JavaScript |
 | `file_upload` | 上传文件 |
 
@@ -162,7 +165,49 @@ Agent 通过 `computer` 工具执行以下操作：
 
 ### 扩展思考
 
-启用 🧠 按钮后，Agent 在执行前会进行推理思考（budget: 10,000 tokens）。与 Fast 模式互斥。
+启用思考按钮后，Agent 在执行前会进行推理思考（budget: 10,000 tokens）。与 Fast 模式互斥。
+
+### 技能模式
+
+在输入框工具栏选择 Agent 的行为模式：
+
+| 模式 | 说明 |
+|------|------|
+| **General**（默认） | 自主解决问题，可调试，灵活应对 |
+| **QA Test** | 严格按步骤执行，遇错只报 PASS/FAIL 不调查 |
+| **Scraper** | 专注数据提取，自动处理分页，遇阻自行换策略 |
+| **Custom** | 用户自定义行为指令 |
+
+### 设备模拟
+
+使用 `emulate_device` 工具切换移动端视口：
+
+| 预设设备 | 分辨率 | DPR |
+|---------|--------|-----|
+| iPhone 14 | 390×844 | 3x |
+| iPhone 14 Pro Max | 430×932 | 3x |
+| iPhone SE | 375×667 | 2x |
+| iPad | 810×1080 | 2x |
+| iPad Pro | 1024×1366 | 2x |
+| Pixel 7 | 412×915 | 2.625x |
+| Galaxy S23 | 360×780 | 3x |
+| desktop | 恢复桌面模式 | — |
+
+模拟内容包含：视口大小、设备像素比、移动端 User Agent、触摸事件支持。
+
+### API 配置
+
+在设置面板（齿轮图标）中配置：
+
+- **API URL** — 默认 `http://127.0.0.1:4819`（本地代理），也可直连 `https://api.anthropic.com`
+- **API Key** — 填写后使用 `x-api-key` 头直连 Anthropic，留空则走本地代理
+
+### 历史记录导入导出
+
+在设置面板底部：
+
+- **Export** — 导出所有对话历史为 JSON 文件
+- **Import** — 导入 JSON 文件，自动合并不重复的对话
 
 ## Tab 锁定
 
