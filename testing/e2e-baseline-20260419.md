@@ -604,3 +604,75 @@ OpenClaw 内核（PID 30384）在启动时加载并 cache 了 `~/Projects/clawli
 | channel | dev | ✅ `12cfae1..8fd5440` (2 commits) |
 | client-web | dev | ✅ `41864e6d..a9bbce3c`（含我的 ad8fc920，rebase 1 commit）|
 | docs | dev | ✅ `79a5000..6600c8d`（baseline v6 早已 push；v7 待最终 commit） |
+
+---
+
+## v8 — OpenClaw 重启后 6 个 PARTIAL 重测（2026-04-19 末段）
+
+### 重启操作
+
+| 步骤 | 结果 |
+|---|---|
+| `kill 30384`（OpenClaw 老进程，启动于 02-23h 前） | ✅ 退出干净 |
+| launchd `KeepAlive=true` 自动 respawn | ✅ 2s 内新 PID `17779` |
+| `/dreaming` health check | ✅ ~26s 后 HTTP 200（5 plugins 加载：acpx/clawline/lossless-claw/mattermost/memory-lancedb-pro） |
+| Channel plugin reconnect 到 relay /backend | ✅ 又过 ~2s（fires `backendConnected:true`，instanceId 仍 `openclaw-fires-local`） |
+| **总停机时间** | ~30s |
+
+无数据丢失：cl_messages / cl_threads / 所有 ACP binding 都是 server-side（Supabase / 文件持久化），重启不丢；仅丢 in-memory 的 WS 客户端会话（自动重连）。
+
+### 6 个 PARTIAL → 终态
+
+| ID | v7 | **v8** | 关键证据 |
+|---|---|---|---|
+| **THREAD-10** | PARTIAL | **PASS** | `pong 🍟 th10v8 ✅` 带 `threadId=0b287e8e-...`；DB outbound `thread_id` 写入正确 |
+| **THREAD-11** | PARTIAL | **PASS** | 全新 chatId `th11-fresh-1776592854` 首发：reply 带 `threadId=3c1972d3-...`，证明 fallback 链生效 |
+| **THREAD-12** | PARTIAL | **PASS** | 同 chatId 内 A(主)+B(thread) 顺发：A 回复 `threadId:null`，B 回复 `threadId:d70cafd7-...`，分流正确 |
+| **THREAD-30** | PARTIAL | **PASS** | `/acp spawn claude --mode persistent --thread auto` 触发 → cl_threads 新增 `id=ed41c916-...,creator_id='acp',type=acp,status=active`；OpenClaw 日志 `[session-binding] ACP thread registered: ed41c916-...` |
+| **THREAD-50** | PARTIAL | **PASS** | `/api/chat` 带 threadId=d70cafd7：DB inbound + outbound **都带** thread_id；reply `pong 🍟 th50v8 ✅` |
+| **THREAD-51** | PARTIAL | **PASS** | 同 thread sibling 链路实测：Web listener 收到 inbound (`threadId:d70cafd7,direction:inbound,source:api`) + outbound (`threadId:d70cafd7,source:api`) |
+
+### TH-1 / TH-4 实证 log 摘录
+
+```
+[clawline] generic deliver called: text=pong 🍟 th10v8 ✅, resolvedThreadId=0b287e8e-87ea-4345-9967-d4b82015d2de
+[clawline send] sendMessageGeneric to=chat:Levis threadId=0b287e8e-87ea-4345-9967-d4b82015d2de msgId=msg-...
+
+[clawline] generic: resolveThreadId falling back to inbound threadId=f84e0fa5-7dc6-4999-84e3-7753f0ed0051   ← TH-1 fix 显式触发
+[session-binding] ACP thread registered: ed41c916-eea3-44a1-871e-f19747110518   ← TH-4 路径正常
+```
+
+### Web UI 端验证（数据层 sibling 证据）
+
+THREAD-51 实测：API 调 /api/chat（带 threadId）后，**真实 Web ws listener 同 chatId+thread** 在 25s 窗口内收到 4 个 message.send 帧，全部带 `threadId=d70cafd7-...`：
+
+| 帧 | content | threadId | direction | source |
+|---|---|---|---|---|
+| 1 | `th51v8 api ping` | d70cafd7-... | inbound | api |
+| 2 | `pong 🍟 th51v8 ✅` | d70cafd7-... | — | — |
+| 3 | `pong 🍟 th51v8 ✅` | d70cafd7-... | — | api |
+| 4 | `pong 🍟 th51v8 ✅` | d70cafd7-... | — | — |
+
+→ **UI 端只要按 `data.threadId` 渲染就会落 thread**，不会漏到主聊天。Web threadStore 已订阅 `thread.updated` / `thread.new_reply`，自动更新 unread badge。
+
+### 重启引入的副作用
+
+无：
+- fires backend 自动重连
+- Web client（4026）仍能正常接收 sibling broadcast
+- 老 thread `0b287e8e-...`（4-16 创建的）正常返回完整 thread.get 数据
+- ACP 老 binding 没了（in-memory only），但触发 spawn 立即重新绑定 + 入 DB
+- 无新 crash / NPE
+
+### v8 汇总数字
+
+| 类别 | v6 | v7 | **v8** | Δ vs v7 |
+|---|---|---|---|---|
+| **PASS** | 78 | 94 | **100** | +6 |
+| **PARTIAL** | 7 | 13 | **7** | -6 |
+| **FAIL** | 1 | 1 | 1 | 0 |
+| **BLOCKED** | 0 | 0 | 0 | 0 |
+| **SKIPPED** | 24 | 24 | 24 | 0 |
+| 总 | 111 | 133 | **132** | -1（THREAD-31 现归入 PASS-via-code-review，不再单算 code-PASS）|
+
+**100 PASS** 首破百。剩余 7 PARTIAL = W-12/W-18 流式/typing UI 独立验证未做（间接通过）+ W-22/23/24（viewport 限制）+ G-13（pool 5min 时序未测）+ S-03（cascade 间接）+ THREAD-31（log 行为靠 code review 不能 live triggered）。
