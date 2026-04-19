@@ -256,3 +256,82 @@ SUPABASE_URL / KEY   仅 sql 类用例需要
 12. **Relay node 多节点分派策略**：`cl_relay_nodes` 表存在但 channel 如何路由到节点未见文档，是否单活 / 多活？
 
 这些点会直接影响测试用例的通过标准，建议先逐条确认「现状是否符合预期」再执行测试。
+
+---
+
+## 15. API Chat 接口（第三方调用 `/api/chat`）
+
+> 第三方程序客户端（Claude Code、CI、自家服务等）通过 `POST /api/chat` 直接与 Agent 对话。本节覆盖修复后的完整契约（含并发安全、可配超时、sibling 广播、错误码、持久化）。
+
+**端点契约**：
+
+```
+POST /api/chat
+  Headers:
+    Authorization: Bearer <USER_TOKEN | ADMIN_TOKEN | LOGTO_JWT>
+    Content-Type: application/json
+  Body:
+    message       : string  (required)
+    channelId     : string  (required)
+    agentId       : string  (required)
+    senderId      : string  (optional, default 'api')
+    chatId        : string  (optional, fallback = senderId)
+    senderName    : string  (optional)
+    timeout       : number  (optional, ms; default 300000; clamp [5000, 600000])
+                    优先级：body.timeout > ?timeout= > RELAY_API_CHAT_TIMEOUT_MS env
+  Response 200:
+    { ok:true, messageId, inboundMessageId, content, agentId, chatId, timestamp, meta:{source:'api'} }
+  Response 4xx/5xx:
+    400 missing required field
+    401 auth required
+    502 agent rejected/closed
+    503 channel backend not connected
+    504 agent did not respond within timeout
+    500 unexpected error
+```
+
+### 15.1 基本
+
+| ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|---|
+| API-CHAT-01 | 单发同步 | fires backend 在线，user token | `curl POST /api/chat` 发 `ping` | HTTP 200，含 `inboundMessageId`、`messageId`、`content` 非空、`meta.source='api'` | curl |
+| API-CHAT-02 | 同 chatId 复用 | 同上 | 同 chatId 连发 3 条，每条不同 message | 3 条均 HTTP 200，3 个 `inboundMessageId` 互异，pool 复用同一 virtualConnId | curl |
+| API-CHAT-03 | 并发不同 chatId × 10 | 同上 | 10 个 chatId 各发 1 条 `&` 并发 | 全部 HTTP 200，无 504/500，inboundMessageId 全互异 | script |
+| API-CHAT-04 | **并发同 chatId × 5（P0-α 关键）** | 同上 | 同一 chatId 同时发 5 条 message，每条不同 | 5 条均 HTTP 200，每条 reply 与 inbound `replyTo` 一一对应，无串话 | script |
+| API-CHAT-05 | 长文本 | 同上 | 发 5K 字符 message | HTTP 200 或 200-with-truncated-reply（取决 agent），不 hang/不 crash | curl |
+
+### 15.2 超时
+
+| ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|---|
+| API-CHAT-10 | 默认超时 = 300s | — | 不传 timeout 发慢消息（让 agent 跑） | 完成或 304s 内 504 | curl |
+| API-CHAT-11 | `body.timeout=10000` | — | 发触发慢回复消息 | ≤10s 后 504 `agent did not respond within timeout` | curl |
+| API-CHAT-12 | `body.timeout=600000` | — | 接受最大值 600s | 不报参数错误，正常处理 | curl |
+| API-CHAT-13 | 超时后补取 | API-CHAT-11 触发 504 后 | 等 agent 实际回复（看 server log），调 `GET /api/messages/sync?channelId=fires&after=<ts>` | sync 能拿到 inbound + 后到的 outbound（meta.source='api'，replyTo 匹配 inboundMessageId） | curl + sleep |
+
+### 15.3 Sibling broadcast
+
+| ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|---|
+| API-CHAT-20 | API → Web 同 chatId 双向可见 | Web ws 已连同 chatId | 通过 Web ws 监听；同时 `POST /api/chat` 同 chatId | Web 收到 inbound `message.send {echo:true,direction:'inbound'}` + outbound `message.send` reply | wscat + curl |
+| API-CHAT-21 | API → Web 不同 chatId 不可见（F3a） | Web ws 连 chatId=A | API 发 chatId=B | Web 不收任何 frame；API 仍能 200 | wscat + curl |
+| API-CHAT-22 | Web 发 → API sync 可查 | Web 已发 1 条到 chatId=X | API caller 调 `GET /api/messages/sync?channelId=fires&after=<ts>` | 拿到 Web 发的 inbound + agent outbound | curl |
+| API-CHAT-23 | Web + API 同 chatId 各发各的 | Web ws 在线 | 同时 Web 发 + API 发，间隔 1s | 两条都各自有正确 reply，不串话；Web 看到 4 条事件（自发 inbound + 自得 outbound + API inbound echo + API outbound） | wscat + curl |
+
+### 15.4 错误
+
+| ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|---|
+| API-CHAT-30 | 无 token | — | 不带 Authorization | HTTP 401 `auth required` | curl |
+| API-CHAT-31 | backend 离线 channel | 用 `ottor`（无 backend） | POST | HTTP 503 `channel backend not connected` | curl |
+| API-CHAT-32 | 缺 message | — | body 不带 `message` | HTTP 400 `message is required` | curl |
+| API-CHAT-33 | 缺 agentId | — | body 不带 `agentId` | HTTP 400 `agentId is required` | curl |
+| API-CHAT-34 | agent 不存在 | fires backend 在线 | `agentId="ghost"` | timeout 504（当前实现）或 backend 给 reject → 502；任一为合格行为 | curl |
+
+### 15.5 持久化
+
+| ID | 标题 | 前置 | 步骤 | 预期 | 工具 |
+|---|---|---|---|---|---|
+| API-CHAT-40 | 1 发 = 2 行 | 同 fires | API-CHAT-01 完成后查 `cl_messages?message_id=eq.<inboundMessageId>` 与 `?meta->>source=eq.api&order=timestamp.desc&limit=2` | inbound 1 行 (direction='inbound', meta.source='api') + outbound 1 行 (direction='outbound', meta.source='api', replyTo=inboundMessageId) | curl + sql |
+| API-CHAT-41 | timeout 后 outbound 仍持久化 | API-CHAT-11 触发 504 后 | 30s 后查 cl_messages | inbound 始终在；outbound 在 backend 实际回包时入库（最终一致） | sql |
+| API-CHAT-42 | 重复 inboundMessageId 去重 | — | 服务端不会重复（每次 randomUUID）；测：手工同 message_id POST → ws 走（同 G-44），DB 始终唯一 | `(message_id, direction)` unique constraint 生效 | sql |
