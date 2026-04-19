@@ -1,8 +1,8 @@
 # Clawline PRD v1
 
-> 版本：v1.5 · 2026-04-19（P0 #1 + P0 #2 已闭环 + 14 条决策固化）
+> 版本：v1.6 · 2026-04-19（reliability-v2 全量落地 — 12 项结构性删除 + 7 项 ADD-BACK 完成）
 > 受众：产品/工程内部
-> 状态：M1/M2 范围已锁，P0/P1 大部分收敛；剩 3 项长尾待决策
+> 状态：M1/M2 范围已锁，P0/P1 大部分收敛；reliability-v2 重构完成，剩 3 项长尾待决策
 
 ## 战略对齐分析（开篇必读）
 
@@ -430,36 +430,73 @@ curl -X POST https://gateway.example/api/chat \
 curl -X POST .../api/chat -d '{"message":"...","channelId":"…","agentId":"…","timeout":500000}'
 ```
 
-**断开后通过 sync 补取**：
-```bash
-# inboundMessageId / timestamp 是上次成功响应里返回的
-curl ".../api/messages/sync?channelId=fires&after=$LAST_TS&limit=20" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  | jq '.messages[] | select(.meta.source == "api")'
-```
-
-**伪流式（轮询，等 P1 #7 SSE 上线前的 stop-gap）**：
-```bash
-START_TS=$(date +%s)000
-curl -X POST .../api/chat -d '{...}' &
-APID=$!
-while kill -0 $APID 2>/dev/null; do
-  sleep 1
-  curl -sS ".../api/messages/sync?channelId=fires&after=$START_TS" \
-    | jq -c '.messages[] | select(.direction == "outbound") | .content'
-done
-wait $APID
-```
-
 ### 行为约束
 
-- **同 chatId 串行**：backend 按顺序处理同 chatId 的消息（agent 行为）。并发请求会排队但都能拿到 reply（FIFO fallback 保证）。
-- **不同 chatId 并行**：实测 10 并发 100% PASS。
-- **跨 client 可见**：Web client 在同 chatId 上能实时看到 API 触发的 inbound + outbound（F3a/F3b）。
-- **持久化**：inbound 在请求入口立即写库；outbound 在 backend 回包时立即写库。两者均带 `meta.source='api'`。
+- **HTTP 契约**：每个 `/api/chat` 调用要么以 2xx 成功返回（agent 已 ack），要么以 4xx/5xx 失败返回。**不存在「成功但需要补取」的中间态。** 失败时 `cl_messages` 不会留下任何 inbound/outbound 行；调用方按需重试（见 §13 «幂等»）。
+- **`/api/messages/sync` 的定位（reliability-v2）**：保留供 Web 客户端冷启动 warm cache 使用，**不再作为错误恢复路径**。Reliability v2（D6 ack-then-persist + ADD-BACK #7 幂等）已确保 caller 收到 200 时 outbound 已落库；caller 收到非 2xx 时无遗留行。
+- **幂等**（ADD-BACK #5 + #7）：caller 可在 body 中传 `messageId`；同一 messageId 第二次调用直接返回缓存的 outbound（HTTP 200，`meta.cached: true`），或在仍处理中时返回 HTTP 409。
+- **同 chatId 串行**：backend 按顺序处理同 chatId 的消息（agent 行为）。并发请求会排队，每个调用方拿到自己的 reply（D3 删 FIFO 兜底后，agent 漏 `replyTo` 的请求显式 504，不会被静默路由给别人）。
+- **不同 chatId 并行**：100 并发实测 96/100 ack，0 ghost row（REL-02 N=100）。
+- **跨 client 可见**：Web client 在同 chatId 上能实时看到 API 触发的 inbound + outbound（fanOut，D11）。
+- **持久化时机**（D6）：inbound 与 outbound 在 backend ack（`message.send` 抵达）时同事务写库。**未 ack 的请求 → 0 行**（无幽灵）。
 
 ---
 
-> 文档版本：v1.5 · 2026-04-19。已固化用户 14 条决策 + 1 项硬指标；Pillar 数 6；P0 6 项（**4 项已 CLOSED**）/ P1 7 项 / P2 持续滚动。基线 v5: 76 PASS / 1 FAIL / 7 PARTIAL / 8 BLOCKED / 19 SKIPPED。
-> 下一版 v1.6 将在第 11 节剩余 3 项决策推进 + UI BLOCKED 解锁后修订。
+---
+
+## 14. Reliability v2 重构记录（v1.6 加入）
+
+第一性原理（Musk 5 步）驱动的结构性瘦身。把 5 处历史 NPE 补丁、FIFO `replyTo` 兜底、3 个 heuristic Map、_threadUpdateChain mutex 等"用补丁掩盖根因"的代码全部删除并重做底层结构。
+
+### 12 项删除（D1–D12 全部完成）
+
+| D | 主题 | 净行数 |
+|---|---|---|
+| D1+D2 | `clientConnections` 拆 `realClients` + `apiSessions`（删 `_apiCallbacks`/`_apiConnPool`） | -244/+246 |
+| D3 | 删 FIFO `replyTo` 兜底（agent 漏 `replyTo` → caller 显式 504） | （含在 D1+D2） |
+| D4 | channel `reply-dispatcher` 三层 fallback → 一层（`inboundThreadId` 唯一来源） | -46/+9 |
+| D5 | 删 `pendingAutoThreads` / `recentlyShifted` / `lastUserMessageId` 三个 heuristic Map | -158/+20 |
+| D6 | inbound 持久化推迟到 backend ack（无 ghost row） | （含在 D6 commit） |
+| D7 | PRD §13「断开后 sync 补取」契约删除（本节即 v1.6 修订） | 文档 |
+| D8 | 删 `~/.openclaw/clawline-history.json` 本地文件持久层 | -310/+10 |
+| D9 | 删 `_threadUpdateChain` mutex；`reply_count` 改为 COUNT(*) on demand | -33/+62 |
+| D10 | 删 F1b 调试 log | -1 |
+| D11 | 4 处 sibling 广播 → 单一 `fanOut()` | （含在 D1+D2） |
+| D12 | client-web `openclaw.lastRead.*` + `openclaw.inbox.lastRead.*` → `clawline.lastRead.*` 单 key + migration | -12/+63 |
+
+### 7 项 ADD-BACK（10% 警戒线之内）
+
+| # | 内容 | 行数 |
+|---|---|---|
+| #1 | D9 配套：thread.get/list `reply_count` COUNT-on-demand | ~5 |
+| #2 | D5 简化：保留 @mention 解析作为唯一显式归线触发器 | 0（已存在） |
+| #3 | D6 配套：sibling echo 同步推迟到 ack（在 D11 fanOut 内） | 0 |
+| #4 | client-side optimistic（client-web `outbox.ts` 已实现） | 0 |
+| #5 | `/api/chat` 接受 caller-provided `messageId` | ~3 |
+| #6 | WS connect `?lastSeenMessageId=` 触发 outbound 补发 | ~50 |
+| #7 | `/api/chat` HTTP 幂等检查（同 messageId → 200 cached / 409 in-flight） | ~50 |
+
+合计 ADD-BACK ≈ 110 行 / 总删除 ≈ 800 行 = **~13%**（10% 警戒线轻微越线，主要是 ADD-BACK #6/#7 实现包含完整 helper 函数与 schema-aware 查询；用户已批准）。
+
+### 测试基础设施
+
+- `gateway/Makefile` + `gateway/test/mock-backend.js` + `gateway/test/rel-suite.js`：完全独立的 REL 测试栈（端口 19181，channel `e2e-rel`），不依赖 OpenClaw 或 LLM。
+- `make test-reliability` 一键跑 REL-01..05；目前 REL-01/02/03 上线，REL-04/05 实现完成等测试用例 wire-in。
+- N=20 baseline：`ack=20 err=0 missing=0 ghost=0` 6.6s。
+- N=100 stretch：`ack=96 err=4 missing=0 ghost=0` 24.7s（无 crash；REL-03 因 `HTTP_RATE_LIMIT=100/min` 被 REL-02 占满而 429，是 pre-existing 测试顺序问题）。
+
+### Step 5.5 中插入的根因修复
+
+`requireAuthAny` → `loadConfig()` 在 100 并发下打爆 Supabase 连接 → unhandled rejection 杀进程。修法：`relay-config-store.js` 加 5 秒 TTL + in-flight dedup（>95% 命中），并把 3 处 loadConfig 调用包 try/catch 失败返 503。**未加全局 unhandledRejection handler**（属掩盖手段）。
+
+### 物理真相对齐
+
+每条消息要么出现在收方处（DB + sibling fanOut + caller resolve 三者一起），要么 caller 拿到明确错误（4xx/5xx）。无静默失败、无幽灵行、无并发误路由。
+
+---
+
+> 文档版本：v1.6 · 2026-04-19。reliability-v2 全量落地（12D + 7 ADD-BACK），第一性原理瘦身收尾。
+> Pillar 数 6；P0 6 项（4 项 CLOSED）/ P1 7 项 / P2 持续滚动。基线 v5: 76 PASS / 1 FAIL / 7 PARTIAL / 8 BLOCKED / 19 SKIPPED（待新一轮全量回归刷新）。
+> 下一版 v1.7：tiger-host 生产部署 + 24h soak + 监控接入。
+
 
