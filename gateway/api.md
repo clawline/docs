@@ -238,7 +238,7 @@ Relay Gateway 支持三种鉴权方式，管理 API 需要其中之一：
 - 网关为此请求创建一个虚拟 WebSocket 连接，模拟完整的消息收发流程
 - 入站和出站消息均持久化到 Supabase，并标记 `meta.source: "api"`
 - 入站消息会广播到该 channel 的所有已连接 WebSocket 客户端
-- 超时时间：**120 秒**
+- 超时时间：默认 300 秒，可由 `body.timeout` / `query.timeout` 覆盖。同步路径硬上限 30 分钟（由 `RELAY_API_CHAT_MAX_TIMEOUT_MS` 配置）。**SSE 路径无 HTTP 级超时**——见下方"流式响应"
 
 **成功响应 (200)：**
 
@@ -258,8 +258,10 @@ Relay Gateway 支持三种鉴权方式，管理 API 需要其中之一：
 | HTTP 状态码 | 场景 |
 |------------|------|
 | 400 | 缺少 `message`、`channelId` 或 `agentId` |
+| 409 | 同一 `messageId` 仍在处理中（幂等保护） |
+| 502 | Agent 拒绝或连接关闭 |
 | 503 | 该 channel 的 backend 未连接 |
-| 504 | Agent 120 秒内未响应 |
+| 504 | 同步路径下 Agent 在 timeout 内未响应 |
 
 **使用示例：**
 
@@ -272,6 +274,63 @@ curl -X POST https://relay.example.com/api/chat \
     "channelId": "demo",
     "agentId": "main"
   }'
+```
+
+#### 流式响应（SSE）
+
+当请求头包含 `Accept: text/event-stream` 时，`/api/chat` 改用 [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events) 推送 Agent 中间事件，**不受同步路径 30 分钟硬上限约束**——流的生命周期完全由 Agent 事件 + caller 断连驱动。
+
+请求体与同步路径一致。响应头：
+
+```
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+X-Accel-Buffering: no
+```
+
+**事件类型与顺序：**
+
+| event | 何时发出 | data 字段 |
+|-------|---------|----------|
+| `accepted` | 入站消息已落库后**立即**发送（首帧） | `inboundMessageId`, `chatId`, `channelId`, `cached?` |
+| `delta` | Agent 推送 `text.delta` / `message.delta` 帧时 | `content`, `index?` |
+| `tool_call` | Agent 推送 `tool.call` / `tool_call` 帧时 | 透传 Agent 原始 data |
+| `tool_result` | Agent 推送 `tool.result` / `tool_result` 帧时 | 透传 Agent 原始 data |
+| `done` | Agent 发出最终 `message.send` 后 | `replyMessageId`, `content`, `agentId`, `timestamp`, `meta`, `usage?` |
+| `error` | Agent reject / backend 断连 / 通道关闭 | `code`, `message` |
+
+**心跳：** 每 15 秒发送一行 SSE 注释 `: ping <timestamp>\n\n`，用于阻止反向代理因空闲断连。
+
+**断连语义：**
+
+- caller 主动断开 → 网关清理 SSE sink（停止后续推送）；**但服务端的 in-flight 请求继续运行**，最终 `message.send` 仍会落库 + fanOut 给该 chatId 的其他 WS 兄弟连接，可由 `GET /api/messages/sync` 找回
+- backend 断连 → 发出 `error` 事件后关流
+- Agent reject → 发出 `error` 事件后关流（入站消息仍保留在 DB，与 REL-06 不变量一致）
+
+**幂等性：** 同一 `messageId` 重复请求，若已有 outbound 缓存，SSE 会一次性发送 `accepted`（带 `cached: true`）+ `done` 后立即关流；若仍 in-flight，返回 HTTP 409 JSON。
+
+**curl 示例：**
+
+```bash
+curl -N -H "Accept: text/event-stream" \
+     -H "Content-Type: application/json" \
+     -H "X-Relay-Admin-Token: your-admin-token" \
+     -d '{"channelId":"demo","agentId":"main","chatId":"sse-1","message":"hello streaming"}' \
+     https://relay.example.com/api/chat
+```
+
+预期输出：
+
+```
+event: accepted
+data: {"inboundMessageId":"api-…","chatId":"sse-1","channelId":"demo"}
+
+event: delta
+data: {"content":"chunk-0 ","index":0}
+
+event: done
+data: {"replyMessageId":"…","content":"…","agentId":"main",…}
 ```
 
 ---
